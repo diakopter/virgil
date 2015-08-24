@@ -5,7 +5,10 @@ To get started with Virgil III you will require:
   * 25MB of disk space
   * 200MB of RAM
   * bash shell
-  * A Java 1.3 or later virtual machine
+  * One of:
+   - A Java 1.3 or later virtual machine
+   - An x86 Linux machine
+   - An x86 MacOS X machine
 
 ## Setup ##
 
