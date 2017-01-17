@@ -123,7 +123,7 @@ class ParserState {
 		if (l > 0) q = 1 + lineEnds.get(l - 1);
 		while (q < at) {
 			var ch = d(q);
-			if (ch == '\t') c = 1 + ((c + 8) / 8) * 8; // tab character
+			if (ch == '\t') c = 1 + (((c + 8) >>> 3) << 3); // tab character
 			else if (ch == '\n') {
 				ERROR.fail(Strings.format2("missed a newline @ %1:%2", l + 1, c));
 				c = 1;

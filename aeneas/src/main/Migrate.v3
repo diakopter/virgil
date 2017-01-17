@@ -1,0 +1,179 @@
+// Copyright 2017 Google Inc. All rights reserved.
+// See LICENSE for details of Apache 2.0 license.
+
+def unused = Aeneas.registerTarget(MigrateArraySyntaxTarget.new());
+
+class MigrateArraySyntaxTarget extends Target {
+	def rw = ArrayReferenceRewriter.new();
+	new() super("migrate-array-syntax") { }
+	def emit(compiler: Compiler, prog: Program) {
+		for (p = prog.vst.declList; p != null; p = p.tail) {
+			var decl = p.head;
+			for (f in prog.vst.files) {
+				if (Strings.equal(f.fileName, decl.token.fileName)) {
+					rw.file = f;
+					rw.patched = false;
+					rewrite(decl);
+					break;
+				}
+			}
+			if (rw.patched) {
+				Terminal.put1("Writing %1\n", rw.file.fileName);
+				var fd = System.fileOpen(rw.file.fileName, false);
+				System.fileWriteK(fd, rw.file.input, 0, rw.file.input.length);
+				System.fileClose(fd);
+			}
+		}
+		rw.file = null;
+	}
+	def rewrite(decl: Decl) {
+		if (VstCompound.?(decl)) {
+			var c = VstCompound.!(decl);
+			def f: VstMember -> void = rewrite;
+			Lists.apply(c.members, f);
+		} else if (VstMethod.?(decl)) {
+			rw.visitS(VstMethod.!(decl).body);
+		} else if (VstField.?(decl)) {
+			rw.visitE(VstField.!(decl).init);
+		}
+	}
+}
+
+class ArrayReferenceRewriter extends VstVisitor<void, void> {
+	var file: ParsedFile;
+	var patched = false;
+	def visitS(s: Stmt) {
+		if (s != null) s.accept<void, void>(this, ());
+	}
+	def visitE(e: Expr) {
+		if (e != null) e.accept<void, void>(this, ());
+	}
+	def visitIf(stmt: IfStmt, env: void) {
+		visitE(stmt.cond);
+		visitS(stmt.tbranch);
+		visitS(stmt.fbranch);
+	}
+	def visitBlock(stmt: BlockStmt, env: void) {
+		for (s in stmt.stmts.asArray()) visitS(s);
+	}
+	def visitWhile(stmt: WhileStmt, env: void) {
+		visitE(stmt.cond);
+		visitS(stmt.body);
+	}
+	def visitFor(stmt: ForStmt, env: void) {
+		visitE(stmt.varDecl.init);
+		visitE(stmt.cond);
+		visitE(stmt.update);
+		visitS(stmt.body);
+	}
+	def visitForeach(stmt: ForeachStmt, env: void) {
+		visitE(stmt.varDecl.init);
+		visitE(stmt.expr);
+		visitS(stmt.body);
+	}
+	def visitForLess(stmt: ForLessStmt, env: void) {
+		visitE(stmt.varDecl.init);
+		visitE(stmt.expr);
+		visitS(stmt.body);
+	}
+	def visitLocal(stmt: LocalStmt, env: void) {
+		for (p = stmt.vars; p != null; p = p.tail) visitE(p.head.init);
+	}
+	def visitBreak(stmt: BreakStmt, env: void) {
+		// do nothing
+	}
+	def visitContinue(stmt: ContinueStmt, env: void) {
+		// do nothing
+	}
+	def visitExpr(stmt: ExprStmt, env: void) {
+		visitE(stmt.expr);
+	}
+	def visitMatch(stmt: MatchStmt, env: void) {
+		visitE(stmt.expr);
+		for (c in stmt.cases.asArray()) {
+			visitS(c.stmt);
+		}
+	}
+	def visitEmpty(stmt: EmptyStmt, env: void) {
+		// do nothing
+	}
+	def visitReturn(stmt: ReturnStmt, env: void) {
+		visitE(stmt.expr);
+	}
+
+	def visitTuple(expr: TupleExpr, env: void) {
+		for (e in expr.exprs.asArray()) visitE(e);
+	}
+	def visitParamExpr(expr: ParamExpr, env: void) {
+		// do nothing
+	}
+	def visitAutoExpr(expr: AutoExpr, env: void) {
+		if (AppExpr.?(expr.expr)) record(AppExpr.!(expr.expr));
+	}
+	def visitArray(expr: ArrayExpr, env: void) {
+		// do nothing
+	}
+	def visitVar(expr: VarExpr, env: void) {
+		visitE(expr.expr);
+	}
+	def visitLiteral(expr: Literal, env: void) {
+		// do nothing
+	}
+	def visitString(expr: StringExpr, env: void) {
+		// do nothing
+	}
+	def visitApp(expr: AppExpr, env: void) {
+		if (V3.isArray(expr.func.exactType)) record(expr);
+		visitE(expr.func);
+		for (e in expr.args.exprs.asArray()) visitE(e);
+	}
+	def visitIndex(expr: IndexExpr, env: void) {
+		visitE(expr.expr);
+		for (e in expr.exprs.asArray()) visitE(e);
+	}
+	def visitNot(expr: NotExpr, env: void) {
+		visitE(expr.expr);
+	}
+	def visitBitwiseNeg(expr: BitwiseNegExpr, env: void) {
+		visitE(expr.expr);
+	}
+	def visitAssign(expr: AssignExpr, env: void) {
+		if (AppExpr.?(expr.target)) record(AppExpr.!(expr.target));
+		visitE(expr.target);
+		visitE(expr.expr);
+	}
+	def visitBinOp(expr: BinOpExpr, env: void) {
+		visitE(expr.left);
+		visitE(expr.right);
+	}
+	def visitIfExpr(expr: IfExpr, env: void) {
+		for (e in expr.exprs.asArray()) visitE(e);
+	}
+	def record(app: AppExpr) {
+		var range = app.args.range();
+		patch(range.beginLine, range.beginColumn, '(', '[');
+		patch(range.endLine, range.endColumn - 1, ')', ']');
+	}
+	def patch(line: int, col: int, a: byte, b: byte) {
+		Terminal.put3("Patching at %1:%2:%3\n", file.fileName, line, col);
+		var pos = file.lineStartOffset(line);
+		var end = file.lineEndOffset(line);
+		var c = 1;
+		while (pos < end) {
+			var ch = file.input(pos);
+			Terminal.put2("Scanning @%1 (col:%2)...{", pos, c);
+			Terminal.putc(ch);
+			Terminal.put("}\n");
+			if (c == col) break;
+			if (ch == '\t') c = 1 + (((c + 8) >>> 3) << 3); // tab character
+			else c++;
+			pos++;
+		}
+		if (file.input(pos) != a && file.input(pos) != b) {
+			var buf = StringBuffer.new().puts("Could not patch \'").putc(a).puts("\' to \'").putc(b).puts(" at ").puts(file.fileName).puts(":").puti(line).puts(":").puti(col);
+			return V3.fail(buf.toString());
+		}
+		file.input(pos) = b;
+		patched = true;
+	}
+}
