@@ -155,15 +155,15 @@ class ArrayReferenceRewriter extends VstVisitor<void, void> {
 		patch(range.endLine, range.endColumn - 1, ')', ']');
 	}
 	def patch(line: int, col: int, a: byte, b: byte) {
-		Terminal.put3("Patching at %1:%2:%3\n", file.fileName, line, col);
+//		Terminal.put3("Patching at %1:%2:%3\n", file.fileName, line, col);
 		var pos = file.lineStartOffset(line);
 		var end = file.lineEndOffset(line);
 		var c = 1;
 		while (pos < end) {
 			var ch = file.input(pos);
-			Terminal.put2("Scanning @%1 (col:%2)...{", pos, c);
-			Terminal.putc(ch);
-			Terminal.put("}\n");
+//			Terminal.put2("Scanning @%1 (col:%2)...{", pos, c);
+//			Terminal.putc(ch);
+//			Terminal.put("}\n");
 			if (c == col) break;
 			if (ch == '\t') c = 1 + (((c + 8) >>> 3) << 3); // tab character
 			else c++;
