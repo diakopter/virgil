@@ -1,47 +1,22 @@
 // Copyright 2017 Google Inc. All rights reserved.
 // See LICENSE for details of Apache 2.0 license.
 
-def unused = Aeneas.registerTarget(MigrateArraySyntaxTarget.new());
-
-class MigrateArraySyntaxTarget extends Target {
-	def rw = ArrayReferenceRewriter.new();
-	new() super("migrate-array-syntax") { }
-	def emit(compiler: Compiler, prog: Program) {
-		for (p = prog.vst.declList; p != null; p = p.tail) {
-			var decl = p.head;
-			for (f in prog.vst.files) {
-				if (Strings.equal(f.fileName, decl.token.fileName)) {
-					rw.file = f;
-					rw.patched = false;
-					rewrite(decl);
-					break;
-				}
-			}
-			if (rw.patched) {
-				Terminal.put1("Writing %1\n", rw.file.fileName);
-				var fd = System.fileOpen(rw.file.fileName, false);
-				System.fileWriteK(fd, rw.file.input, 0, rw.file.input.length);
-				System.fileClose(fd);
-			}
-		}
-		rw.file = null;
-	}
-	def rewrite(decl: Decl) {
-		if (VstCompound.?(decl)) {
-			var c = VstCompound.!(decl);
-			def f: VstMember -> void = rewrite;
-			Lists.apply(c.members, f);
-		} else if (VstMethod.?(decl)) {
-			rw.visitS(VstMethod.!(decl).body);
-		} else if (VstField.?(decl)) {
-			rw.visitE(VstField.!(decl).init);
-		}
-	}
-}
-
 class ArrayReferenceRewriter extends VstVisitor<void, void> {
 	var file: ParsedFile;
 	var patched = false;
+        def visitD(decl: Decl) {
+		if (VstCompound.?(decl)) {
+			var c = VstCompound.!(decl);
+			def f: VstMember -> void = visitD;
+			Lists.apply(c.members, f);
+		} else if (VstMethod.?(decl)) {
+			visitS(VstMethod.!(decl).body);
+		} else if (VstField.?(decl)) {
+			visitE(VstField.!(decl).init);
+		} else if (VarDecl.?(decl)) {
+                	visitE(VarDecl.!(decl).init);
+                }
+       	}
 	def visitS(s: Stmt) {
 		if (s != null) s.accept<void, void>(this, ());
 	}
@@ -176,4 +151,12 @@ class ArrayReferenceRewriter extends VstVisitor<void, void> {
 		file.input(pos) = b;
 		patched = true;
 	}
+        def rewrite() {
+        	if (!patched) return;
+		Terminal.put1("Writing %1\n", file.fileName);
+		var fd = System.fileOpen(file.fileName, false);
+		System.fileWriteK(fd, file.input, 0, file.input.length);
+		System.fileClose(fd);
+                patched = false;
+       	}
 }

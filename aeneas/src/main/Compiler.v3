@@ -242,8 +242,25 @@ class Compilation(compiler: Compiler, prog: Program, target: Target) {
 			Verifier.new(compiler, prog).verify();
 			if (Aeneas.PRINT_VST.get()) VstPrinter.new().printProgram(prog);
 		}
+                if (Aeneas.MIGRATE_ARRAY_SYNTAX.get()) migrate();
 		return prog.ERROR.noErrors;
 	}
+        def migrate() {
+        	var rw = ArrayReferenceRewriter.new();
+		for (p = prog.vst.declList; p != null; p = p.tail) {
+			var decl = p.head;
+			for (f in prog.vst.files) {
+				if (Strings.equal(f.fileName, decl.token.fileName)) {
+					rw.file = f;
+					rw.patched = false;
+					rw.visitD(decl);
+					break;
+				}
+			}
+                        rw.rewrite();
+		}
+		rw.file = null;
+        }
 	def init() -> bool {
 		prog.initState = Array.new(prog.ir.init.length);
 		prog.compRecords = Array.new(prog.vst.numComponents);
