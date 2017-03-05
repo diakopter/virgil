@@ -86,7 +86,7 @@ class ArrayReferenceRewriter extends VstVisitor<void, void> {
 		if (AppExpr.?(expr.expr)) record(AppExpr.!(expr.expr));
 	}
 	def visitArray(expr: ArrayExpr, env: void) {
-		// do nothing
+		for (e in expr.exprs.asArray()) visitE(e);
 	}
 	def visitVar(expr: VarExpr, env: void) {
 		visitE(expr.expr);
