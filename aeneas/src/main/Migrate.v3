@@ -65,9 +65,8 @@ class ArrayReferenceRewriter extends VstVisitor<void, void> {
 	}
 	def visitMatch(stmt: MatchStmt, env: void) {
 		visitE(stmt.expr);
-		for (c in stmt.cases.asArray()) {
-			visitS(c.stmt);
-		}
+		for (c in stmt.cases.asArray()) visitS(c.stmt);
+		if (stmt.defcase != null) visitS(stmt.defcase.stmt);
 	}
 	def visitEmpty(stmt: EmptyStmt, env: void) {
 		// do nothing
@@ -135,7 +134,7 @@ class ArrayReferenceRewriter extends VstVisitor<void, void> {
 		var end = file.lineEndOffset(line);
 		var c = 1;
 		while (pos < end) {
-			var ch = file.input(pos);
+			var ch = file.input[pos];
 //			Terminal.put2("Scanning @%1 (col:%2)...{", pos, c);
 //			Terminal.putc(ch);
 //			Terminal.put("}\n");
@@ -144,11 +143,11 @@ class ArrayReferenceRewriter extends VstVisitor<void, void> {
 			else c++;
 			pos++;
 		}
-		if (file.input(pos) != a && file.input(pos) != b) {
+		if (file.input[pos] != a && file.input[pos] != b) {
 			var buf = StringBuffer.new().puts("Could not patch \'").putc(a).puts("\' to \'").putc(b).puts(" at ").puts(file.fileName).puts(":").puti(line).puts(":").puti(col);
 			return V3.fail(buf.toString());
 		}
-		file.input(pos) = b;
+		file.input[pos] = b;
 		patched = true;
 	}
         def rewrite() {
