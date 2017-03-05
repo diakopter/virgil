@@ -1,9 +1,16 @@
 // Copyright 2017 Google Inc. All rights reserved.
 // See LICENSE for details of Apache 2.0 license.
 
-class ArrayReferenceRewriter extends VstVisitor<void, void> {
-	var file: ParsedFile;
+class SyntaxMigrater(file: ParsedFile) extends VstVisitor<void, void> {
 	var patched = false;
+	var delta = 0;
+	def replaces = Vector<(int, string, string)>.new();
+
+	def reset() {
+		delta = 0;
+		replaces.length = 0;
+		patched = false;
+	}
         def visitD(decl: Decl) {
 		if (VstCompound.?(decl)) {
 			var c = VstCompound.!(decl);
@@ -65,8 +72,31 @@ class ArrayReferenceRewriter extends VstVisitor<void, void> {
 	}
 	def visitMatch(stmt: MatchStmt, env: void) {
 		visitE(stmt.expr);
-		for (c in stmt.cases.asArray()) visitS(c.stmt);
+		for (c in stmt.cases.asArray()) {
+			visitS(c.stmt);
+			patchCase(c);
+		}
 		if (stmt.defcase != null) visitS(stmt.defcase.stmt);
+	}
+	def patchCase(c: MatchCase) {
+		// migrate 0: foo()  to 0 => foo()
+		var start: FilePoint;
+		if (c.default != null) {
+			start = c.default;
+		} else {
+			var ps = c.patterns.asArray(), p = ps[ps.length - 1];
+			if (p.params != null) start = p.params.range().end();
+			else start = p.expr.range().end();
+		}
+		// Find the colon separating the pattern from the statement.
+		var r = c.stmt.range(), end = charOffset(r.beginLine, r.beginColumn);
+		for (pos = charOffset(start.beginLine, start.beginColumn); pos < end; pos++) {
+			if (file.input[pos] == ':') {
+				if (file.input[pos-1] == ' ') replace(pos, ":", "=>");
+				else replace(pos, ":", " =>");
+				break;
+			}
+		}
 	}
 	def visitEmpty(stmt: EmptyStmt, env: void) {
 		// do nothing
@@ -129,20 +159,7 @@ class ArrayReferenceRewriter extends VstVisitor<void, void> {
 		patch(range.endLine, range.endColumn - 1, ')', ']');
 	}
 	def patch(line: int, col: int, a: byte, b: byte) {
-//		Terminal.put3("Patching at %1:%2:%3\n", file.fileName, line, col);
-		var pos = file.lineStartOffset(line);
-		var end = file.lineEndOffset(line);
-		var c = 1;
-		while (pos < end) {
-			var ch = file.input[pos];
-//			Terminal.put2("Scanning @%1 (col:%2)...{", pos, c);
-//			Terminal.putc(ch);
-//			Terminal.put("}\n");
-			if (c == col) break;
-			if (ch == '\t') c = 1 + (((c + 8) >>> 3) << 3); // tab character
-			else c++;
-			pos++;
-		}
+		var pos = charOffset(line, col);
 		if (file.input[pos] != a && file.input[pos] != b) {
 			var buf = StringBuffer.new().puts("Could not patch \'").putc(a).puts("\' to \'").putc(b).puts(" at ").puts(file.fileName).puts(":").puti(line).puts(":").puti(col);
 			return V3.fail(buf.toString());
@@ -150,11 +167,52 @@ class ArrayReferenceRewriter extends VstVisitor<void, void> {
 		file.input[pos] = b;
 		patched = true;
 	}
+	def charOffset(line: int, col: int) -> int {
+		var pos = file.lineStartOffset(line);
+		var end = file.lineEndOffset(line);
+		var c = 1;
+		while (pos < end) {
+			var ch = file.input[pos];
+			if (c == col) break;
+			if (ch == '\t') c = 1 + (((c + 8) >>> 3) << 3); // tab character
+			else c++;
+			pos++;
+		}
+		return pos;
+	}
+	def replace(pos: int, input: string, output: string) {
+		patched = true;
+		if (input.length == output.length) {
+			// replacement fits exactly.
+			for (i < output.length) file.input[pos + i] = output[i];
+		} else {
+			// replacement requires copying the file over.
+			replaces.add(pos, input, output);
+			delta += output.length - input.length;
+		}
+	}
+	def cmpPatch(a: (int, string, string), b: (int, string, string)) -> bool {
+		return a.0 < b.0;
+	}
         def rewrite() {
         	if (!patched) return;
 		Terminal.put1("Writing %1\n", file.fileName);
 		var fd = System.fileOpen(file.fileName, false);
-		System.fileWriteK(fd, file.input, 0, file.input.length);
+		var data = file.input;
+		var num_replaces = replaces.length;
+		if (num_replaces > 0) {
+			var ndata = Array<byte>.new(data.length + delta);
+			var oldpos = 0, newpos = 0;
+			for (p in Arrays.sort(replaces.extract(), 0, num_replaces, cmpPatch)) {
+				var len = p.0 - oldpos;
+				for (i < len) ndata[newpos++] = data[oldpos++];
+				for (i < p.2.length) ndata[newpos++] = p.2[i];
+				oldpos += p.1.length;
+			}
+			while (oldpos < file.input.length) ndata[newpos++] = data[oldpos++];
+			data = ndata;
+		}
+		System.fileWriteK(fd, data, 0, data.length);
 		System.fileClose(fd);
                 patched = false;
        	}
