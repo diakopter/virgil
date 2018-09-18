@@ -676,7 +676,7 @@ class VstSsaGen extends VstVisitor<VstSsaEnv, SsaInstr> {
 				return env.addOp(newClassAllocOp(spec, funcType, env), Facts.NONE);
 			}
 			ComponentMethod(member, typeArgs) => {
-				var spec = specOf(member.container.getDeclaredType(), member, typeArgs);
+				var spec = globalMethodOf(member.container.getDeclaredType(), member, typeArgs);
 				if (receiver == null) receiver = initOf(member, env);
 				return env.opComponentGetMethod(spec, receiver);
 			}
@@ -685,7 +685,7 @@ class VstSsaGen extends VstVisitor<VstSsaEnv, SsaInstr> {
 				var container = member.container.getDeclaredType();
 				var const = fieldConst(container, member, receiver, env);
 				if (const != null) return const;
-				var spec = specOf(container, member, null);
+				var spec = ir.fromVstMember(member);
 				return env.opComponentGetField(spec, receiver);
 			}
 			VariantField(container, member) => {
@@ -728,18 +728,19 @@ class VstSsaGen extends VstVisitor<VstSsaEnv, SsaInstr> {
 	}
 	def fieldConst(container: Type, member: VstField, receiver: SsaInstr, env: VstSsaEnv) -> SsaInstr {
 		if (!member.isReadOnly) return null;
-		container = elimTypeVars(container);
-		var m = ir.makeIrClass(container).fields[member.index];
-		m.facts |= Fact.X_LIVE; // XXX: liveness analysis here?
+                var f = if (VstComponent.?(member.container),
+                		IrField.!(ir.getComponentIrMember(member)),
+                                ir.makeIrClass(container).fields[member.index]);
+		f.facts |= Fact.X_LIVE; // XXX: liveness analysis really needed here?
 		if (!Literal.?(member.init)) return null;
 		if (container.typeCon.kind == V3Kind.CLASS) {
-			env.opNullCheck(container, receiver);
+			env.opNullCheck(elimTypeVars(container), receiver);
 		}
 		var lit = Literal.!(member.init);
 		var const = graph.valConst(lit.exactType, lit.val);
-		var ftype = m.fieldType;
-		// TODO: gross hack to get around implicit convertibles
-		if (lit.exactType != ftype) return env.opTypeCast(lit.exactType, ftype, const);
+		var ft = f.fieldType;
+		// XXX: hack for implicit convertibles
+		if (lit.exactType != ft) return env.opTypeCast(lit.exactType, ft, const);
 		return const;
 	}
 	def genVarWrite(varbind: VarBinding, varSource: Source, receiver: SsaInstr, val: SsaInstr, checked: bool, env: VstSsaEnv) -> SsaInstr {
@@ -751,7 +752,7 @@ class VstSsaGen extends VstVisitor<VstSsaEnv, SsaInstr> {
 				if (checked && i != null) i.facts |= Fact.O_NO_NULL_CHECK;
 			}
 			ComponentField(member) => {
-				var spec = specOf(member.container.getDeclaredType(), member, null);
+				var spec = ir.fromVstMember(member);
 				if (receiver == null) receiver = initOf(member, env);
 				env.opComponentSetField(spec, receiver, val);
 			}
@@ -771,7 +772,7 @@ class VstSsaGen extends VstVisitor<VstSsaEnv, SsaInstr> {
 				return env.opCallClosure(elimTypeVars(t), Arrays.prepend(target, args));
 			}
 			CallComponentMethod(container, member, typeArgs) => {
-				var spec = specOf(container, member, typeArgs);
+				var spec = globalMethodOf(container, member, typeArgs);
 				if (target == null) initOf(member, env);
 				return env.opCallMethod(spec, args);
 			}
@@ -844,12 +845,18 @@ class VstSsaGen extends VstVisitor<VstSsaEnv, SsaInstr> {
 		}
 		return V3Op.newClassAlloc(spec);
 	}
+        def globalMethodOf(container: Type, member: VstMember, typeArgs: TypeArgs) -> IrSpec {
+        	var m = ir.getComponentIrMember(member);
+                return elimTypeVarsForIrSpec(container, m, typeArgs);
+        }
 	def specOf(container: Type, member: VstMember, typeArgs: TypeArgs) -> IrSpec {
 		container = elimTypeVars(container);
 		var ic = ir.makeIrClass(container), m: IrMember;
 		if (VstField.?(member)) m = ic.fields[member.index];
 		else m = ic.methods[member.index];
-
+                return elimTypeVarsForIrSpec(container, m, typeArgs);
+	}
+	def elimTypeVarsForIrSpec(container: Type, m: IrMember, typeArgs: TypeArgs) -> IrSpec {
 		var newTa = [container];
 		if (typeArgs != null) {
 			// add method type parameters to the type arguments array
@@ -863,13 +870,9 @@ class VstSsaGen extends VstVisitor<VstSsaEnv, SsaInstr> {
 		return IrSpec.new(container, newTa, m);
 	}
 	def initOf(member: VstMember, block: SsaBuilder) -> SsaInstr {
-		var decl = VstCompound.!(member.container);
-		var ctype = decl.getDeclaredType();
-		var constructor = decl.constructor;
-		if (constructor.initIndex >= 0) {
-			return block.opInit(ir.makeIrClass(ctype).methods[0]);
-		}
-		return block.graph.nullConst(ctype);
+		var decl = member.container, n = decl.constructor;
+		if (n.initIndex >= 0) return block.opInit(ir.init[n.initIndex]);
+		return block.graph.nullConst(decl.getDeclaredType());
 	}
 	def genReceiver(expr: Expr, env: VstSsaEnv) -> SsaInstr {
 		return if (expr == null, null, env.genExpr(expr));

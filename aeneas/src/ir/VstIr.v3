@@ -2,7 +2,80 @@
 // See LICENSE for details of Apache 2.0 license.
 
 // Builds IR classes and variants from VST classes and variants.
-class IrBuilder(ctype: Type, parent: IrClass) {
+component VstIr {
+	def addComponent(ir: IrModule, decl: VstComponent) {
+                var container = decl.getDeclaredType();
+		for (list = decl.members; list != null; list = list.tail) {
+			var s = list.head;
+			if (VstField.?(s)) {
+                        	var vstf = VstField.!(s);
+                                var f = newIrField(container, vstf, false);
+                                vstf.index = f.global = ir.globals.length;
+                                ir.globals.add(f);
+                        } else if (VstNew.?(s)) {
+                        	var vstn = VstNew.!(s);
+				var m = IrMethod.new(container, null, VstIr.getParamTypes(vstn), container);
+				m.source = vstn;
+				m.facts |= Fact.M_NEW;
+                                vstn.index = -1;
+                                vstn.initIndex = ir.init.length;
+                                ir.init.add(m);
+                        } else if (VstMethod.?(s)) {
+                        	var vstm = VstMethod.!(s);
+                                var m = newIrMethod(container, vstm);
+                                vstm.index = m.global = ir.methods.length;
+                                ir.methods.add(m);
+                        }
+		}
+        }
+        def addClass(ir: IrModule, container: Type, decl: VstClass) -> IrClass {
+		var ptype = decl.getDeclaredType(), ic: IrClass;
+		if (ptype == container) {
+			// create a new IR class
+                        var stype = V3.getSuperType(container);
+			var sc = if(stype != null, ir.makeIrClass(stype));
+                        ic = IrBuilder.new(container, sc).buildClass(decl);
+			ir.classes.add(ic);
+		} else {
+			// get the IR class of the polymorphic type
+			ic = ir.makeIrClass(ptype);
+		}
+		ir.classMap[container] = ic;
+		return ic;
+        }
+	def addEnumInit(ir: IrModule, decl: VstCompound) {
+		var ic = ir.makeIrClass(decl.getDeclaredType());
+		var constructor = ic.methods[IrUtil.CONSTRUCTOR_INDEX];
+		var vstn = VstNew.!(constructor.source);
+		vstn.initIndex = ir.init.length;
+		ir.init.add(constructor);
+        }
+        def newIrField(container: Type, vstf: VstField, isVariant: bool) -> IrField {
+		var f = IrField.new(container, vstf.getType());
+		f.source = vstf;
+		if (vstf.isReadOnly) f.setFact(Fact.F_VALUE | Fact.O_FOLDABLE);
+		if (isVariant) f.setFact(Fact.F_VALUE | Fact.O_FOLDABLE | Fact.O_PURE);
+                return f;
+        }
+	def newIrMethod(container: Type, vstm: VstMethod) -> IrMethod {
+		var returnType = if(vstm.returnThis, vstm.container.getDeclaredType(), vstm.rettype.getType());
+		var typeArgs: TypeArgs;
+		if (vstm.typeParams != null) typeArgs = TypeArgs.new(vstm.typeEnv, null);
+		var m = IrMethod.new(container, typeArgs, getParamTypes(vstm), returnType);
+		m.source = vstm;
+		if (EmptyStmt.?(vstm.body)) m.facts |= Fact.M_EMPTY;
+		return m;
+	}
+	def getParamTypes(m: VstMethod) -> Array<Type> {
+		var vec = Vector<Type>.new();
+		for (l = m.params.list; l != null; l = l.tail) {
+			vec.add(l.head.vtype);
+		}
+		return vec.extract();
+	}
+}
+// Helper class for creating IrClass instances.
+class IrBuilder(container: Type, parent: IrClass) {
 	def fields = Vector<IrField>.new();
 	def methods = Vector<IrMethod>.new();
 
@@ -13,7 +86,7 @@ class IrBuilder(ctype: Type, parent: IrClass) {
 		} else {
 			fields.addN(parent.fields);
 			methods.addN(parent.methods);
-			methods[0] = null; // overwrite super constructor
+			methods[IrUtil.CONSTRUCTOR_INDEX] = null; // overwrite super constructor
 		}
 	}
 	def buildClass(decl: VstCompound) -> IrClass {
@@ -28,73 +101,53 @@ class IrBuilder(ctype: Type, parent: IrClass) {
 		}
 		return build();
 	}
-	def addVstField(f: VstField, isVariant: bool) {
-		var ir = IrField.new(ctype, f.getType());
-		ir.source = f;
-		if (f.isReadOnly) ir.setFact(Fact.F_VALUE | Fact.O_FOLDABLE);
-		if (isVariant) ir.setFact(Fact.F_VALUE | Fact.O_FOLDABLE | Fact.O_PURE);
-		addIrField(ir);
-		f.index = ir.index;
+	def addVstField(vstf: VstField, isVariant: bool) {
+                var f = VstIr.newIrField(container, vstf, isVariant);
+                addIrField(f);
+		vstf.index = f.index;
 	}
-	def addVstNew(m: VstNew, isVariant: bool) {
-		// constructors always occupy slot 0
-		m.index = 0;
-		if (m.nontrivial()) {
+	def addVstNew(vstn: VstNew, isVariant: bool) {
+		vstn.index = IrUtil.CONSTRUCTOR_INDEX;  // fixed slot for constructors
+		if (vstn.nontrivial()) {
 			// only generate an IrMethod if the constructor is nontrivial
-			var receiverType = m.container.getDeclaredType();
-			var ir = IrMethod.new(ctype, null, getParamTypes(m), receiverType);
-			ir.source = m;
-			ir.facts |= Fact.M_NEW;
-			if (isVariant) ir.setFact(Fact.O_PURE | Fact.M_INLINE | Fact.V_NON_ZERO);
-			setIrMethod(0, ir);
+			var receiverType = vstn.container.getDeclaredType();
+			var m = IrMethod.new(container, null, VstIr.getParamTypes(vstn), receiverType);
+			m.source = vstn;
+			m.facts |= Fact.M_NEW;
+			if (isVariant) m.setFact(Fact.O_PURE | Fact.M_INLINE | Fact.V_NON_ZERO);
+			setIrMethod(0, m);
 		}
 	}
-	def addVstMethod(m: VstMethod) {
-		var ir = newIrMethod(m);
-		var r = m.root;
-		if (r == m) {
+	def addVstMethod(vstm: VstMethod) {
+		var m = VstIr.newIrMethod(container, vstm);
+		var r = vstm.root;
+		if (r == vstm) {
 			// this is the root method of a method family
-			addIrMethod(ir);
+			addIrMethod(m);
 		} else {
 			// this is an override
 			parent.methods[r.index].facts |= Fact.M_OVERRIDDEN;
-			ir.facts |= Fact.M_OVERRIDE;
-			setIrMethod(r.index, ir);
+			m.facts |= Fact.M_OVERRIDE;
+			setIrMethod(r.index, m);
 		}
-		m.index = ir.index;
-	}
-	def newIrMethod(m: VstMethod) -> IrMethod {
-		var returnType = if(m.returnThis, m.container.getDeclaredType(), m.rettype.getType());
-		var typeArgs: TypeArgs;
-		if (m.typeParams != null) typeArgs = TypeArgs.new(m.typeEnv, null);
-		var ir = IrMethod.new(ctype, typeArgs, getParamTypes(m), returnType);
-		ir.source = m;
-		if (EmptyStmt.?(m.body)) ir.facts |= Fact.M_EMPTY;
-		return ir;
-	}
-	def getParamTypes(m: VstMethod) -> Array<Type> {
-		var vec = Vector<Type>.new();
-		for (l = m.params.list; l != null; l = l.tail) {
-			vec.add(l.head.vtype);
-		}
-		return vec.extract();
+		vstm.index = m.index;
 	}
 	def build() -> IrClass {
 		var typeArgs: TypeArgs;
-		if (V3.isPolymorphicClass(ctype)) {
-			var decl = V3.classDecl(ctype);
+		if (V3.isPolymorphicClass(container)) {
+			var decl = V3.classDecl(container);
 			typeArgs = TypeArgs.new(decl.typeEnv, null);
 		}
-		return IrClass.new(ctype, typeArgs, parent, fields.extract(), methods.extract());
+		return IrClass.new(container, typeArgs, parent, fields.extract(), methods.extract());
 	}
-	def addIrField(f: IrField) {
+        def addIrField(f: IrField) {
 		setIndex(fields.length, f);
 		fields.add(f);
-	}
+        }
 	def addIrMethod(m: IrMethod) {
 		if (m.facts.M_NEW) {
-			methods[0] = m;
-			setIndex(0, m);
+			methods[IrUtil.CONSTRUCTOR_INDEX] = m;
+			setIndex(IrUtil.CONSTRUCTOR_INDEX, m);
 		} else {
 			setIndex(methods.length, m);
 			methods.add(m);

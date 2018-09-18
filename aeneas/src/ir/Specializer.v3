@@ -33,7 +33,7 @@ class Specializer(ra: ReachabilityAnalyzer, rn: ReachabilityNormalizer) {
 		ra.liveMethods.apply(createNewIrMethod);
 	}
 	def createSpecs(rc: RaClass) {
-		for (ml in rc.methods) {
+		for (ml in rc.methods.array) {
 			var vlist: List<RaMethod>;
 			for (l = ml; l != null; l = l.tail) {
 				var rm = l.head;

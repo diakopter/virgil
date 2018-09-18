@@ -35,14 +35,15 @@ class IrClass extends IrItem {
 }
 // represents a member of a class, component, or variant
 class IrMember(container: Type) extends IrItem {
-	var index = -1;		// index into the appropriate members list
+	var index = -1;		// local index into container's members vector
+        var global = -1;	// global index into module's members vector
 
 	def render(buffer: StringBuffer) -> StringBuffer;
 	def renderLong(buffer: StringBuffer) -> StringBuffer {
 		if (container != null) container.render(buffer).putc('.');
 		return render(buffer);
 	}
-	def isConst() -> bool      { return facts.F_VALUE; }
+	def isConst() -> bool { return facts.F_VALUE; }
 }
 // represents a field of a class, component, or variant
 class IrField extends IrMember {
@@ -221,6 +222,7 @@ class IrSpec(container: Type, typeArgs: Array<Type>, member: IrMember) {
 }
 // Utility methods for dealing with Ir classes, methods, and fields
 component IrUtil {
+	def CONSTRUCTOR_INDEX = 0;
 	def EQUALS_METHOD_INDEX = 1;
 
 	def newIrSpecMap<T>() -> HashMap<IrSpec, T> {
@@ -234,6 +236,7 @@ component IrUtil {
 class IrModule {
 	def classMap = TypeUtil.newTypeMap<IrClass>();
 	def classes = Vector<IrClass>.new();
+        def globals = Vector<IrField>.new();
 	def methods = Vector<IrMethod>.new();
 	def init = Vector<IrMethod>.new();
 	var mainMethod: IrSpec;
@@ -241,18 +244,34 @@ class IrModule {
 	def fromIrMemberAndTypes(typeArgs: Array<Type>, member: IrMember) -> IrSpec {
 		return IrSpec.new(typeArgs[0], typeArgs, member);
 	}
-	def fromVstMemberAndType(container: Type, member: VstMember) -> IrSpec {
-		return fromIrMemberAndTypes([container], makeIrMember(member));
+	def fromVstMemberAndType(container: Type, vst: VstMember) -> IrSpec {
+		return fromIrMemberAndTypes([container], makeIrMember(vst));
 	}
-	def fromVstMember(member: VstMember) -> IrSpec {
-		var m = makeIrMember(member), c = member.container.getDeclaredType();
+	def fromVstMember(vst: VstMember) -> IrSpec {
+		var m = makeIrMember(vst), c = vst.container.getDeclaredType();
 		return fromIrMemberAndTypes([c], m);
 	}
-	private def makeIrMember(m: VstMember) -> IrMember {
-		var ic = makeIrClass(m.container.getDeclaredType());
-		if (VstMethod.?(m)) return ic.methods[m.index];
-		else return ic.fields[m.index];
+	private def makeIrMember(vst: VstMember) -> IrMember {
+        	if (VstComponent.?(vst.container)) return getComponentIrMember(vst);
+		var ic = makeIrClass(vst.container.getDeclaredType());
+		if (VstMethod.?(vst)) return ic.methods[vst.index];
+		else return ic.fields[vst.index];
 	}
+        def getComponentIrMember(vst: VstMember) -> IrMember {
+        	if (VstNew.?(vst)) {
+                	var m = init[VstNew.!(vst).initIndex];
+                        if (m == null || m.source != vst) return V3.fail1("mismatched source for %1", vst.renderLong);
+                        return m;
+                }
+                if (VstMethod.?(vst)) {
+                	var m = methods[vst.index];
+                        if (m == null || m.source != vst) return V3.fail1("mismatched source for %1", vst.renderLong);
+                        return m;
+                }
+               	var m = globals[vst.index];
+                if (m == null || m.source != vst) return V3.fail1("mismatched source for %1", vst.renderLong);
+		return m;
+        }
 	def resolveMethodImpl(classType: Type, irSpec: IrSpec) -> IrSpec {
 		var ic = makeIrClass(classType);
 		var m = ic.methods[irSpec.member.index];
@@ -298,36 +317,12 @@ class IrModule {
 		return makeIrClass(ctype).fields.length;
 	}
 	def makeIrClass(ctype: Type) -> IrClass {
-		if (ctype == null) return null;
+                if (V3.isComponent(ctype)) return V3.fail1("ir.makeIrClass of component (%1)", ctype.render);
+                
 		var ic = classMap[ctype];
-		if (ic == null) {
-			if (V3.isClass(ctype)) {
-				ic = newIrClassWithSuper(ctype, V3.classDecl(ctype));
-			} else if (V3.isComponent(ctype)) {
-				ic = newIrClass(ctype, null, V3.componentDecl(ctype));
-				classMap[ctype] = ic;
-			}
-		}
-		return ic;
-	}
-	def newIrClassWithSuper(ctype: Type, decl: VstCompound) -> IrClass {
-		var ptype = decl.getDeclaredType();
-		var ic: IrClass;
-		if (ptype == ctype) {
-			// create a new IR class
-			var sc = makeIrClass(V3.getSuperType(ctype));
-			ic = newIrClass(ctype, sc, decl);
-		} else {
-			// get the IR class of the polymorphic type
-			ic = makeIrClass(ptype);
-		}
-		classMap[ctype] = ic;
-		return ic;
-	}
-	def newIrClass(ctype: Type, superClass: IrClass, decl: VstCompound) -> IrClass {
-		var ic = IrBuilder.new(ctype, superClass).buildClass(decl);
-		classes.add(ic);
-		return ic;
+		if (ic != null) return ic;
+                var decl = V3.classDecl(ctype);
+                return VstIr.addClass(this, ctype, decl);
 	}
 	def isEnum(t: Type) -> bool {
 		return makeIrClass(t).facts.C_ENUM;

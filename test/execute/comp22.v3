@@ -1,0 +1,9 @@
+//@execute 0=0; 4=8; -9=-18
+var f = (9, 9);
+def main(a: int) -> int {
+	set(a, a);
+        return f.0 + f.1;
+}
+def set(x: int, y: int) {
+	f = (x, y);
+}

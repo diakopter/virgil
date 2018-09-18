@@ -486,10 +486,12 @@ class JvmV3ComponentGen extends JvmClassGen {
 			clinit_code = builder.newCodeBuilder();
 		}
 
-		var record = builder.jprog.prog.getComponentRecord(V3.asComponent(componentType).componentDecl);
+		return V3.unimplemented();
+/**		var record = builder.jprog.prog.getComponentRecord(V3.asComponent(componentType).componentDecl);
 		builder.emitValue(clinit_code, f.fieldType, record.values[f.index]);
 		var memberRef = IrSpec.new(ic.ctype, [ic.ctype], f);
 		builder.jprog.jrep.emitSetField(memberRef, clinit_code, false);
+***/
 	}
 	def buildMainMethodBridge(jname: string, jsig: JvmSig, args: Type, rt: Type) {
 		var main_meth = builder.newStaticMethod("main", JvmTypes.SIG_JAVA_MAIN.descriptor());

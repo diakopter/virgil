@@ -391,9 +391,6 @@ component V3Op {
 		if (prog.initState[index] == InitState.Uninit) {
 			var ctype = meth.container;
 			var receiver = Values.BOTTOM;
-			if (ctype.typeCon.kind == V3Kind.COMPONENT) {
-				receiver = prog.getComponentRecord(V3.asComponent(ctype).componentDecl);
-			}
 			prog.initState[index] = InitState.Running;
 			var spec = IrSpec.new(ctype, [ctype], meth);
 			return args.fwCall(spec, receiver, 0, 0);
@@ -407,10 +404,7 @@ component V3Op {
 			fieldRef.getFieldType(), evalComponentGetField, fieldRef.member);
 	}
 	def evalComponentGetField(memberRef: IrMember, args: Arguments) -> Result {
-		return getComponentRecord(args).values[memberRef.index];
-	}
-	def getComponentRecord(args: Arguments) -> Record {
-		return args.getProgram().getComponentRecord(V3.asComponent(args.getType(0)).componentDecl);
+		return args.getProgram().globalValues[memberRef.global];
 	}
 //----------------------------------------------------------------------------
 	def newComponentSetField(fieldRef: IrSpec) -> Operator {
@@ -419,7 +413,7 @@ component V3Op {
 			Void.TYPE, evalComponentSetField, fieldRef.member);
 	}
 	def evalComponentSetField(memberRef: IrMember, args: Arguments) -> Result {
-		getComponentRecord(args).values[memberRef.index] = args.getArg(1);
+		args.getProgram().globalValues[memberRef.global] = args.getArg(1);
 		return Values.BOTTOM;
 	}
 //----------------------------------------------------------------------------

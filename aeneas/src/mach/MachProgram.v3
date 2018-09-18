@@ -27,6 +27,7 @@ class MachProgram(prog: Program, code: AddressSpace, data: AddressSpace, intNorm
 		stackAlign = data.alignment;
 	}
 	def build(compiler: Compiler, config: SsaMachGenConfig) {
+        	processGlobals(prog.ir.globals);
 		prog.ir.classes.apply(processIrClass);
 		var methods = prog.ir.methods;
 		var machGen = SsaMachGen.new(this, compiler, config);
@@ -50,7 +51,6 @@ class MachProgram(prog: Program, code: AddressSpace, data: AddressSpace, intNorm
 	}
 	def processIrClass(ic: IrClass) {
 		var t = ic.ctype;
-		if (V3.isComponent(t)) return processComponent(ic);
 		// compute size of heap objects if necessary
 		if (ic.minClassId < 0) return;
 		if (!Facts.isLive(ic)) return;
@@ -68,13 +68,10 @@ class MachProgram(prog: Program, code: AddressSpace, data: AddressSpace, intNorm
 		for (f in ic.fields) if (f.machOffset > maxf.machOffset) maxf = f;
 		ic.machSize = data.align(maxf.machOffset + sizeOf(maxf.fieldType));
 	}
-	def processComponent(ic: IrClass) {
-		// queue component record for processing
-		var r = getComponentRecord(ic.ctype);
-		if (r != null) recordQueue.add(r);
-		for (i < ic.fields.length) {
-			// XXX: could segregate component fields into refs and nonrefs
-			var f = ic.fields[i];
+        def processGlobals(globals: Vector<IrField>) {
+        	for (i < globals.length) {
+			// XXX: could segregate global fields into refs and nonrefs
+			var f = globals[i];
 			var size = sizeOf(f.fieldType);
 			dataRegion.align(size);
 			fieldMap[f] = dataRegion.allocate(f, size);
@@ -270,9 +267,6 @@ class MachProgram(prog: Program, code: AddressSpace, data: AddressSpace, intNorm
 		}
 		return unexpectedType(t, 0);
 	}
-	private def getComponentRecord(t: Type) -> Record {
-		return prog.getComponentRecord(V3.asComponent(t).componentDecl);
-	}
 	def encodeData(region: Region, u: DataBuffer, a: Addr) {
 		if (a.is<Record>()) encodeRecord(u, a.get<Record>());
 		else if (a.is<IrMtable>()) encodeMtable(u, a.get<IrMtable>());
@@ -280,9 +274,8 @@ class MachProgram(prog: Program, code: AddressSpace, data: AddressSpace, intNorm
 		else return prog.ERROR.fail("unexpected data item in region");
 	}
 	def encodeField(u: DataBuffer, f: IrField) {
-		// encode a component's field at the address
-		var r = getComponentRecord(f.container);
-		encodeVal(u, r.values[f.index], f.fieldType);
+		// encode a global field's value at the address
+		encodeVal(u, prog.globalValues[f.global], f.fieldType);
 	}
 	def encodeRecord(u: DataBuffer, r: Record) {
 		var v = r.values;

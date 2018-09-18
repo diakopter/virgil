@@ -19,7 +19,7 @@ class Program {
 	var global: Type;
 	// dynamic portion of the program, including initialized state
 	var initState: Array<InitState>;
-	var compRecords: Array<Record>;
+	var globalValues: Array<Val>;
 	var strRecords: Array<Record>;
 	var globals: Array<Val>;
 	var recordCount: int;
@@ -59,15 +59,6 @@ class Program {
 			V3.asComponent(global).componentDecl.recordIndex = vst.numComponents++;
 		}
 		return global;
-	}
-	def getComponentRecord(comp: VstComponent) -> Record {
-		var index = comp.recordIndex;
-		if (index >= compRecords.length) return null;
-		return compRecords[index];
-	}
-	def setComponentRecord(comp: VstComponent, record: Record) {
-		var index = comp.recordIndex;
-		if (index < compRecords.length) compRecords[index] = record;
 	}
 	def getStringRecord(sexpr: StringExpr) -> Record { 
 		var record = strRecords[sexpr.recordIndex];
