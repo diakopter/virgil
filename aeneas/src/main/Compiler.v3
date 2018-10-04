@@ -76,6 +76,10 @@ class Compiler(target: Target) {
 	var VstInit			= true;
 	var GenVariantEqual		= false;
 	var Reachability		= Aeneas.RA.get();
+	// normalization settings
+	var MaxNumReturnValues		= 1000;
+	var MaxNumParameters		= 65000;
+	var TypedOverflow		= true;
 	// optimization settings
 	var VstBranchOpt		= flags.get("VstBranchOpt", true);
 	var VstControlOpt		= flags.get("VstControlOpt", true);

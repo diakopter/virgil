@@ -32,6 +32,8 @@ class JvmTarget extends Target {
 		compiler.PartialSpecialization = false;
 		compiler.RaDevirtualize = false;
 		compiler.GenVariantEqual = true;
+		compiler.MaxNumReturnValues = 1;
+		compiler.MaxNumParameters = 1000;
 		SystemModule.install(prog);
 	}
 }
